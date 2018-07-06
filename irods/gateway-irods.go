@@ -14,6 +14,7 @@ import (
 	"io"
 	"mime"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -36,6 +37,7 @@ const (
 	metadataObjectNameTemplate = "multipart_v1_%s_%x_irods.json"
 	irodsBackend               = "irods"
 	irodsMarkerPrefix          = "{minio}"
+	irodsIQuestQuery           = "minio_list_objects"
 	irodsMultipartSubCol       = "multiparts"
 	irodsObjMetaAttr           = "minio_obj"
 	irodsMultipartMetaAttr     = "minio_multipart"
@@ -302,8 +304,8 @@ func (a *irodsObjects) DeleteBucket(ctx context.Context, bucket string) error {
 // - Application supplied markers are used as-is to list
 //   object keys that appear after it in the lexicographical order.
 //
-// minio_list_objects:
-// SELECT R_META_MAIN.meta_attr_value, R_DATA_MAIN.modify_ts, R_DATA_MAIN.data_size, R_DATA_MAIN.data_checksum
+// irodsIQuestQuery:
+// SELECT R_META_MAIN.meta_attr_value, R_DATA_MAIN.modify_ts, R_DATA_MAIN.data_size, R_DATA_MAIN.data_checksum, R_DATA_MAIN.data_name
 // FROM R_OBJT_METAMAP JOIN R_META_MAIN ON R_META_MAIN.meta_id = R_OBJT_METAMAP.meta_id
 // LEFT JOIN R_DATA_MAIN ON R_DATA_MAIN.data_id = R_OBJT_METAMAP.object_id
 // WHERE R_META_MAIN.meta_attr_name = ? AND R_META_MAIN.meta_attr_value LIKE ?
@@ -323,7 +325,7 @@ func (a *irodsObjects) ListObjects(ctx context.Context, bucket, prefix, marker, 
 
 	metaPrefix := bucket + ":::::"
 
-	objs, qErr := a.col.Con().IQuestSQL("minio_list_objects", irodsObjMetaAttr, metaPrefix+prefix+"%")
+	objs, qErr := a.col.Con().IQuestSQL(irodsIQuestQuery, irodsObjMetaAttr, metaPrefix+prefix+"%")
 
 	if qErr != nil {
 		return result, irodsToObjectError(fmt.Errorf("Error occured listing objects in %v", bucket), bucket, prefix)
@@ -475,7 +477,7 @@ func (a *irodsObjects) GetObject(ctx context.Context, bucket, object string, sta
 func (a *irodsObjects) GetObjectInfo(ctx context.Context, bucket, object string) (objInfo minio.ObjectInfo, err error) {
 	metaPrefix := bucket + ":::::"
 
-	objs, qErr := a.col.Con().IQuestSQL("minio_list_objects", irodsObjMetaAttr, metaPrefix+object)
+	objs, qErr := a.col.Con().IQuestSQL(irodsIQuestQuery, irodsObjMetaAttr, metaPrefix+object)
 	if qErr != nil {
 		return objInfo, fmt.Errorf("Error occured listing object in %v", bucket)
 	}
@@ -799,91 +801,74 @@ func (a *irodsObjects) PutObjectPart(ctx context.Context, bucket, object, upload
 
 // ListObjectParts - Use Irods equivalent GetBlockList.
 func (a *irodsObjects) ListObjectParts(ctx context.Context, bucket, object, uploadID string, partNumberMarker int, maxParts int) (result minio.ListPartsInfo, err error) {
-	// if err = a.checkUploadIDExists(ctx, bucket, object, uploadID); err != nil {
-	// 	return result, err
-	// }
+	if err = a.checkUploadIDExists(ctx, bucket, object, uploadID); err != nil {
+		return result, err
+	}
 
-	// result.Bucket = bucket
-	// result.Object = object
-	// result.UploadID = uploadID
-	// result.MaxParts = maxParts
+	result.Bucket = bucket
+	result.Object = object
+	result.UploadID = uploadID
+	result.MaxParts = maxParts
 
-	// objBlob := a.client.GetContainerReference(bucket).GetBlobReference(object)
-	// resp, err := objBlob.GetBlockList(storage.BlockListTypeUncommitted, nil)
-	// irodsErr, ok := err.(storage.AzureStorageServiceError)
-	// if ok && irodsErr.StatusCode == http.StatusNotFound {
-	// 	// If no parts are uploaded yet then we return empty list.
-	// 	return result, nil
-	// }
-	// if err != nil {
-	// 	logger.LogIf(ctx, err)
-	// 	return result, irodsToObjectError(err, bucket, object)
-	// }
-	// // Build a sorted list of parts and return the requested entries.
-	// partsMap := make(map[int]minio.PartInfo)
-	// for _, block := range resp.UncommittedBlocks {
-	// 	var partNumber int
-	// 	var parsedUploadID string
-	// 	var md5Hex string
-	// 	if partNumber, _, parsedUploadID, md5Hex, err = irodsParseBlockID(block.Name); err != nil {
-	// 		logger.LogIf(ctx, fmt.Errorf("Unexpected error"))
-	// 		return result, irodsToObjectError(fmt.Errorf("Unexpected error"), bucket, object)
-	// 	}
-	// 	if parsedUploadID != uploadID {
-	// 		continue
-	// 	}
-	// 	part, ok := partsMap[partNumber]
-	// 	if !ok {
-	// 		partsMap[partNumber] = minio.PartInfo{
-	// 			PartNumber: partNumber,
-	// 			Size:       block.Size,
-	// 			ETag:       md5Hex,
-	// 		}
-	// 		continue
-	// 	}
-	// 	if part.ETag != md5Hex {
-	// 		// If two parts of same partNumber were uploaded with different contents
-	// 		// return error as we won't be able to decide which the latest part is.
-	// 		logger.LogIf(ctx, fmt.Errorf("Unexpected error"))
-	// 		return result, irodsToObjectError(fmt.Errorf("Unexpected error"), bucket, object)
-	// 	}
-	// 	part.Size += block.Size
-	// 	partsMap[partNumber] = part
-	// }
-	// var parts []minio.PartInfo
-	// for _, part := range partsMap {
-	// 	parts = append(parts, part)
-	// }
-	// sort.Slice(parts, func(i int, j int) bool {
-	// 	return parts[i].PartNumber < parts[j].PartNumber
-	// })
-	// partsCount := 0
-	// i := 0
-	// if partNumberMarker != 0 {
-	// 	// If the marker was set, skip the entries till the marker.
-	// 	for _, part := range parts {
-	// 		i++
-	// 		if part.PartNumber == partNumberMarker {
-	// 			break
-	// 		}
-	// 	}
-	// }
-	// for partsCount < maxParts && i < len(parts) {
-	// 	result.Parts = append(result.Parts, parts[i])
-	// 	i++
-	// 	partsCount++
-	// }
+	partsQ, qErr := a.col.Con().IQuestSQL(irodsIQuestQuery, irodsMultipartMetaAttr, uploadID)
+	if qErr != nil {
+		return result, qErr
+	}
 
-	// if i < len(parts) {
-	// 	result.IsTruncated = true
-	// 	if partsCount != 0 {
-	// 		result.NextPartNumberMarker = result.Parts[partsCount-1].PartNumber
-	// 	}
-	// }
-	// result.PartNumberMarker = partNumberMarker
-	// return result, nil
+	partsMap := make(map[int]minio.PartInfo)
+	for _, partSlc := range partsQ {
 
-	return
+		//partMetaVal := partSlc[0]
+		//partUnixTime, _ := strconv.ParseInt(partSlc[1], 10, 64)
+		//partModTime := time.Unix(partUnixTime, 0)
+		partSize, _ := strconv.ParseInt(partSlc[2], 10, 64)
+		partMD5 := partSlc[3]
+		partObjName := partSlc[4]
+		partNumber, cErr := strconv.Atoi(strings.Split(partObjName, "_")[1])
+		if cErr != nil {
+			return result, cErr
+		}
+
+		partsMap[partNumber] = minio.PartInfo{
+			PartNumber: partNumber,
+			Size:       partSize,
+			ETag:       getMD5Hash(partMD5) + "-1",
+		}
+
+	}
+
+	var parts []minio.PartInfo
+	for _, part := range partsMap {
+		parts = append(parts, part)
+	}
+	sort.Slice(parts, func(i int, j int) bool {
+		return parts[i].PartNumber < parts[j].PartNumber
+	})
+	partsCount := 0
+	i := 0
+	if partNumberMarker != 0 {
+		// If the marker was set, skip the entries till the marker.
+		for _, part := range parts {
+			i++
+			if part.PartNumber == partNumberMarker {
+				break
+			}
+		}
+	}
+	for partsCount < maxParts && i < len(parts) {
+		result.Parts = append(result.Parts, parts[i])
+		i++
+		partsCount++
+	}
+
+	if i < len(parts) {
+		result.IsTruncated = true
+		if partsCount != 0 {
+			result.NextPartNumberMarker = result.Parts[partsCount-1].PartNumber
+		}
+	}
+	result.PartNumberMarker = partNumberMarker
+	return result, nil
 }
 
 // AbortMultipartUpload - Not Implemented.

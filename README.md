@@ -10,7 +10,7 @@ $ docker build -t minio-irods-gateway .
 **Prep for your iCAT server:**
 
 ```
-$ iadmin asq "SELECT R_META_MAIN.meta_attr_value, R_DATA_MAIN.modify_ts, R_DATA_MAIN.data_size, R_DATA_MAIN.data_checksum FROM R_OBJT_METAMAP JOIN R_META_MAIN ON R_META_MAIN.meta_id = R_OBJT_METAMAP.meta_id LEFT JOIN R_DATA_MAIN ON R_DATA_MAIN.data_id = R_OBJT_METAMAP.object_id WHERE R_META_MAIN.meta_attr_name = ? AND R_META_MAIN.meta_attr_value LIKE ? ORDER BY R_META_MAIN.meta_attr_value ASC" minio_list_objects
+$ iadmin asq "SELECT R_META_MAIN.meta_attr_value, R_DATA_MAIN.modify_ts, R_DATA_MAIN.data_size, R_DATA_MAIN.data_checksum, R_DATA_MAIN.data_name FROM R_OBJT_METAMAP JOIN R_META_MAIN ON R_META_MAIN.meta_id = R_OBJT_METAMAP.meta_id LEFT JOIN R_DATA_MAIN ON R_DATA_MAIN.data_id = R_OBJT_METAMAP.object_id WHERE R_META_MAIN.meta_attr_name = ? AND R_META_MAIN.meta_attr_value LIKE ? ORDER BY R_META_MAIN.meta_attr_value ASC" minio_list_objects
 ```
 
 **Create Minio User**
@@ -51,7 +51,7 @@ The development infrastructure supports exhaustive testing on supported platform
 
 ------
 
-Every day new cloud-native scientific applications are being developed and deployed. These applications leverage the cloud's infinite scalability, rapid development & deployment cycles, and reduced costs. Cloud computing is becoming ubiquitous across research environments everywhere. Naturally, developers are moving from old school POSIX type storage to cloud-based object storage hosted at AWS, Azure and GCP. Cloud native developers are beginning to utilize these object storage services combined with cluster-computing/machine learning frameworks like Apache Spark and AWS Athena to extract meaningful information from raw datasets.
+Every day new cloud-native scientific applications are being developed and deployed. These applications leverage the cloud's infinite scalability, rapid development & deployment cycles, and reduced costs. Cloud computing is becoming ubiquitous across research environments everywhere. Naturally, developers are moving from old school POSIX type storage to cloud-based object storage hosted at AWS, Azure and GCP. Cloud native developers are beginning to utilize these object storage services combined with cluster-computing / big data tools like Apache Spark, Hive, Presto, and AWS Athena to extract meaningful information from raw datasets.
 
 Minio provides a cloud-agnostic object storage layer for these applications. It creates an abstraction for uniform access to object storage, with support for multiple back end clouds. With Minio, a developer doesn't have to choose between cloud specific APIs/SDKs for AWS, Azure, or GCP. They can write their application once (targeting `s3://` specifically) and maintain uniform, repeatable deployments across public and private clouds.
 
