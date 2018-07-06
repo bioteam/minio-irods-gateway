@@ -302,7 +302,7 @@ type ObjectLayer interface {
 Now I'll describe how `minio.Gateway.ListObjects` was implemented. To improve performance and implement the various S3 request parameters, we utilized a custom iquest query (think `iquest --sql`) that searches/filters object keys stored in metadata value fields, effectively offloading `prefix` parameter logic to the database engine. The default iRODS client code paths didn't have this ability and would require an SQL query per object to search keys (names) in metadata (very slow!).
 
 ```sql
-SELECT R_META_MAIN.meta_attr_value, R_DATA_MAIN.modify_ts, R_DATA_MAIN.data_size, R_DATA_MAIN.data_checksum
+SELECT R_META_MAIN.meta_attr_value, R_DATA_MAIN.modify_ts, R_DATA_MAIN.data_size, R_DATA_MAIN.data_checksum, R_DATA_MAIN.data_name
 FROM R_OBJT_METAMAP
 JOIN R_META_MAIN ON R_META_MAIN.meta_id = R_OBJT_METAMAP.meta_id
 LEFT JOIN R_DATA_MAIN ON R_DATA_MAIN.data_id = R_OBJT_METAMAP.object_id
