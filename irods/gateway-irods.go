@@ -140,7 +140,7 @@ func irodsGatewayMain(ctx *cli.Context) {
 	minio.StartGateway(ctx, &Irods{host: host, port: port, zone: zone, colPath: colPath})
 }
 
-// Irods implements Gateway.
+// Irods implements minio.Gateway
 type Irods struct {
 	host    string
 	port    int
@@ -150,12 +150,12 @@ type Irods struct {
 	pass    string
 }
 
-// Name implements Gateway interface.
+// Name returns the gateway name
 func (g *Irods) Name() string {
 	return irodsBackend
 }
 
-// NewGatewayLayer initializes GoRODS client and returns IrodsObjects.
+// NewGatewayLayer initializes GoRODS client and returns minio.ObjectLayer.
 func (g *Irods) NewGatewayLayer(creds auth.Credentials) (minio.ObjectLayer, error) {
 
 	rodsCon, conErr := gorods.NewConnection(&gorods.ConnectionOptions{
@@ -184,7 +184,7 @@ func (g *Irods) NewGatewayLayer(creds auth.Credentials) (minio.ObjectLayer, erro
 	}, nil
 }
 
-// Production - Irods gateway is production ready.
+// Production - is iRODS gateway is production ready?
 func (g *Irods) Production() bool {
 	return true
 }
