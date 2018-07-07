@@ -118,6 +118,11 @@ func (a *irodsObjects) getObjectInBucket(bucket, object string) (*gorods.DataObj
 	return a.col.Con().DataObject(a.col.Path() + "/" + bucket + "/" + objectNameHash)
 }
 
+func (a *irodsObjects) getMetaObjectInBucket(bucket, uploadID, metaObject string) (*gorods.DataObj, error) {
+	objectName := getIrodsMetadataObjectName(metaObject, uploadID)
+	return a.col.Con().DataObject(a.col.Path() + "/" + bucket + "/" + objectName)
+}
+
 // Returns true if marker was returned by iRODS, i.e prefixed with
 // {minio}
 func isIrodsMarker(marker string) bool {
@@ -681,7 +686,7 @@ func checkIrodsUploadID(ctx context.Context, uploadID string) (err error) {
 }
 
 func (a *irodsObjects) checkUploadIDExists(ctx context.Context, bucketName, objectName, uploadID string) (err error) {
-	_, gErr := a.getObjectInBucket(bucketName, getIrodsMetadataObjectName(objectName, uploadID))
+	_, gErr := a.getMetaObjectInBucket(bucketName, uploadID, objectName)
 	if gErr != nil {
 		return minio.ObjectNotFound{
 			Bucket: bucketName,
@@ -725,7 +730,7 @@ func (a *irodsObjects) NewMultipartUpload(ctx context.Context, bucket, object st
 		return "", jErr
 	}
 
-	rodsObj, cErr := a.createRodsObj(metadataObject, bucket, false)
+	rodsObj, cErr := a.createRodsObj(bucket, metadataObject, false)
 	if cErr != nil {
 		return "", cErr
 	}
@@ -878,8 +883,7 @@ func (a *irodsObjects) AbortMultipartUpload(ctx context.Context, bucket, object,
 	}
 
 	// Get reference to .json metadata object
-	metadataObject := getIrodsMetadataObjectName(object, uploadID)
-	rodsObj, oErr := a.getObjectInBucket(bucket, metadataObject)
+	rodsObj, oErr := a.getMetaObjectInBucket(bucket, uploadID, object)
 	if oErr != nil {
 		return oErr
 	}
