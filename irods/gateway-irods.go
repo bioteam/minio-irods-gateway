@@ -871,19 +871,41 @@ func (a *irodsObjects) ListObjectParts(ctx context.Context, bucket, object, uplo
 	return result, nil
 }
 
-// AbortMultipartUpload - Not Implemented.
-// There is no corresponding API in irods to abort an incomplete upload. The uncommmitted blocks
-// gets deleted after one week.
+// AbortMultipartUpload
 func (a *irodsObjects) AbortMultipartUpload(ctx context.Context, bucket, object, uploadID string) (err error) {
-	// if err = a.checkUploadIDExists(ctx, bucket, object, uploadID); err != nil {
-	// 	return err
-	// }
+	if err = a.checkUploadIDExists(ctx, bucket, object, uploadID); err != nil {
+		return err
+	}
 
-	// blob := a.client.GetContainerReference(bucket).GetBlobReference(
-	// 	getIrodsMetadataObjectName(object, uploadID))
-	// return blob.Delete(nil)
+	// Get reference to .json metadata object
+	metadataObject := getIrodsMetadataObjectName(object, uploadID)
+	rodsObj, oErr := a.getObjectInBucket(bucket, metadataObject)
+	if oErr != nil {
+		return oErr
+	}
 
-	return
+	// Get reference to {bucket}/multiparts
+	mpCol, mErr := a.getMultipartCol(bucket)
+	if mErr != nil {
+		return mErr
+	}
+
+	objHash := getMD5Hash(object)
+
+	// Delete parts
+	if err = mpCol.Each(func(partObj gorods.IRodsObj) error {
+		if strings.HasPrefix(partObj.Name(), objHash) {
+			if dErr := partObj.Destroy(); dErr != nil {
+				return dErr
+			}
+		}
+		return nil
+	}); err != nil {
+		return err
+	}
+
+	return rodsObj.Destroy()
+
 }
 
 // CompleteMultipartUpload - Use Irods equivalent PutBlockList.
