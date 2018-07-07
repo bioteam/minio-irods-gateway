@@ -1,5 +1,5 @@
 # [BioTeam](https://bioteam.net/) / minio-irods-gateway
-Expose data in your iRODS zone as S3 object storage via Minio gateway.
+Expose data in your iRODS zone as S3 object storage via Minio gateway. Read the [implementation blog post here](https://bioteam.net/2018/07/exposing-your-irods-zone-as-aws-s3-object-storage/).
 
 ![hello_s3](https://user-images.githubusercontent.com/21206449/42189211-4875ee84-7e25-11e8-99be-58cd8fec5aea.png)
 
