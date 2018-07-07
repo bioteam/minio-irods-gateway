@@ -32,7 +32,7 @@ $ docker build -t minio-irods-gateway .
 
 3. Run `minio-irods-gateway` Container:
 
-Replace the connection details with your own iRODS provider server.
+Replace the connection details with your own iRODS provider server and credentials.
 
 ```
 $ docker run -p 9000:9000 \

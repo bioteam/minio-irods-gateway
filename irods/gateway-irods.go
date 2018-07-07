@@ -914,128 +914,85 @@ func (a *irodsObjects) AbortMultipartUpload(ctx context.Context, bucket, object,
 
 // CompleteMultipartUpload - Use Irods equivalent PutBlockList.
 func (a *irodsObjects) CompleteMultipartUpload(ctx context.Context, bucket, object, uploadID string, uploadedParts []minio.CompletePart) (objInfo minio.ObjectInfo, err error) {
-	// metadataObject := getIrodsMetadataObjectName(object, uploadID)
-	// if err = a.checkUploadIDExists(ctx, bucket, object, uploadID); err != nil {
-	// 	return objInfo, err
-	// }
+	if err = a.checkUploadIDExists(ctx, bucket, object, uploadID); err != nil {
+		return objInfo, err
+	}
 
-	// if err = checkIrodsUploadID(ctx, uploadID); err != nil {
-	// 	return objInfo, err
-	// }
+	if err = checkIrodsUploadID(ctx, uploadID); err != nil {
+		return objInfo, err
+	}
 
-	// var metadataReader io.Reader
-	// blob := a.client.GetContainerReference(bucket).GetBlobReference(metadataObject)
-	// if metadataReader, err = blob.Get(nil); err != nil {
-	// 	logger.LogIf(ctx, err)
-	// 	return objInfo, irodsToObjectError(err, bucket, metadataObject)
-	// }
+	var metadata irodsMultipartMetadata
 
-	// var metadata irodsMultipartMetadata
-	// if err = json.NewDecoder(metadataReader).Decode(&metadata); err != nil {
-	// 	logger.LogIf(ctx, err)
-	// 	return objInfo, irodsToObjectError(err, bucket, metadataObject)
-	// }
+	// Get metadata
+	metaObj, mErr := a.getMetaObjectInBucket(bucket, uploadID, object)
+	if mErr != nil {
+		return objInfo, mErr
+	}
+	defer metaObj.Destroy()
 
-	// defer func() {
-	// 	if err != nil {
-	// 		return
-	// 	}
+	if metaBytes, bErr := metaObj.Read(); bErr == nil {
+		if pErr := json.Unmarshal(metaBytes, &metadata); pErr != nil {
+			return objInfo, pErr
+		}
+	}
 
-	// 	blob := a.client.GetContainerReference(bucket).GetBlobReference(metadataObject)
-	// 	derr := blob.Delete(nil)
-	// 	logger.GetReqInfo(ctx).AppendTags("uploadID", uploadID)
-	// 	logger.LogIf(ctx, derr)
-	// }()
+	mpCol, gErr := a.getMultipartCol(bucket)
+	if gErr != nil {
+		return objInfo, gErr
+	}
 
-	// objBlob := a.client.GetContainerReference(bucket).GetBlobReference(object)
-	// resp, err := objBlob.GetBlockList(storage.BlockListTypeUncommitted, nil)
-	// if err != nil {
-	// 	logger.LogIf(ctx, err)
-	// 	return objInfo, irodsToObjectError(err, bucket, object)
-	// }
+	// Create final object
+	finalObj, fErr := a.createRodsObj(bucket, object, true)
+	if fErr != nil {
+		return objInfo, fErr
+	}
+	defer finalObj.Close()
 
-	// getBlocks := func(partNumber int, etag string) (blocks []storage.Block, size int64, err error) {
-	// 	for _, part := range resp.UncommittedBlocks {
-	// 		var partID int
-	// 		var readUploadID string
-	// 		var md5Hex string
-	// 		if partID, _, readUploadID, md5Hex, err = irodsParseBlockID(part.Name); err != nil {
-	// 			return nil, 0, err
-	// 		}
+	up := minio.CompletedParts(uploadedParts)
 
-	// 		if partNumber == partID && uploadID == readUploadID && etag == md5Hex {
-	// 			blocks = append(blocks, storage.Block{
-	// 				ID:     part.Name,
-	// 				Status: storage.BlockStatusUncommitted,
-	// 			})
+	// Read parts and write to final object
+	sort.Sort(up)
+	for _, cPart := range up {
+		partObj := mpCol.FindObj(fmt.Sprintf("%s_%i", getMD5Hash(object), cPart.PartNumber))
+		if partObj == nil {
+			return objInfo, fmt.Errorf("Unable to locate multipart object %v %v", object, cPart.PartNumber)
+		}
 
-	// 			size += part.Size
-	// 		}
-	// 	}
+		if data, dErr := partObj.Read(); dErr == nil {
+			if wErr := finalObj.WriteBytes(data); wErr != nil {
+				return objInfo, wErr
+			}
+		} else {
+			return objInfo, dErr
+		}
 
-	// 	if len(blocks) == 0 {
-	// 		return nil, 0, minio.InvalidPart{}
-	// 	}
+		partObj.Destroy()
+	}
 
-	// 	return blocks, size, nil
-	// }
+	// Add metadata
+	for k, v := range metadata.Metadata {
+		if _, zErr := finalObj.AddMeta(gorods.Meta{
+			"minio_meta_" + k, // Attribute
+			v,                 // Value
+			"",                // Unit
+			nil,
+		}); zErr != nil {
+			return objInfo, zErr
+		}
+	}
 
-	// var allBlocks []storage.Block
-	// partSizes := make([]int64, len(uploadedParts))
-	// for i, part := range uploadedParts {
-	// 	var blocks []storage.Block
-	// 	var size int64
-	// 	blocks, size, err = getBlocks(part.PartNumber, part.ETag)
-	// 	if err != nil {
-	// 		logger.LogIf(ctx, err)
-	// 		return objInfo, err
-	// 	}
+	chkSum, _ := finalObj.Chksum()
 
-	// 	allBlocks = append(allBlocks, blocks...)
-	// 	partSizes[i] = size
-	// }
-
-	// // Error out if parts except last part sizing < 5MiB.
-	// for i, size := range partSizes[:len(partSizes)-1] {
-	// 	if size < irodsS3MinPartSize {
-	// 		logger.LogIf(ctx, minio.PartTooSmall{
-	// 			PartNumber: uploadedParts[i].PartNumber,
-	// 			PartSize:   size,
-	// 			PartETag:   uploadedParts[i].ETag,
-	// 		})
-	// 		return objInfo, minio.PartTooSmall{
-	// 			PartNumber: uploadedParts[i].PartNumber,
-	// 			PartSize:   size,
-	// 			PartETag:   uploadedParts[i].ETag,
-	// 		}
-	// 	}
-	// }
-
-	// err = objBlob.PutBlockList(allBlocks, nil)
-	// if err != nil {
-	// 	logger.LogIf(ctx, err)
-	// 	return objInfo, irodsToObjectError(err, bucket, object)
-	// }
-	// if len(metadata.Metadata) > 0 {
-	// 	objBlob.Metadata, objBlob.Properties, err = s3MetaToIrodsProperties(ctx, metadata.Metadata)
-	// 	if err != nil {
-	// 		logger.LogIf(ctx, err)
-	// 		return objInfo, irodsToObjectError(err, bucket, object)
-	// 	}
-	// 	err = objBlob.SetProperties(nil)
-	// 	if err != nil {
-	// 		logger.LogIf(ctx, err)
-	// 		return objInfo, irodsToObjectError(err, bucket, object)
-	// 	}
-	// 	err = objBlob.SetMetadata(nil)
-	// 	if err != nil {
-	// 		logger.LogIf(ctx, err)
-	// 		return objInfo, irodsToObjectError(err, bucket, object)
-	// 	}
-	// }
-	// return a.GetObjectInfo(ctx, bucket, object)
-
-	return
+	return minio.ObjectInfo{
+		Bucket:          bucket,
+		Name:            object,
+		ModTime:         finalObj.ModTime(),
+		Size:            finalObj.Size(),
+		ETag:            getMD5Hash(chkSum) + "-1",
+		ContentType:     getMime(object),
+		ContentEncoding: "",
+	}, nil
 }
 
 // SetBucketPolicy - Irods supports three types of container policies:
