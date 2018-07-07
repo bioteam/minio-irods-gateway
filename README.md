@@ -27,6 +27,10 @@ Your iRODS username will act as `MINIO_ACCESS_KEY`, and your password as `MINIO_
 1. Clone and `cd` into this repo's root directory 
 2. Build Docker Container:
 
+**Note:**
+
+You can also download a pre-built Docker container: `docker pull jacquayj/minio-irods-gateway`
+
 ```
 $ docker build -t minio-irods-gateway .
 ```
