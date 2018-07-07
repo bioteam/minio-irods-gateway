@@ -53,4 +53,4 @@ $ docker run -p 9000:9000 \
 
 5. [Read more about the implementation details](https://bioteam.net/2018/07/exposing-your-irods-zone-as-aws-s3-object-storage/)
 
-6. This project has some issues (don't we all?), [help out by contributing!](https://github.com/bioteam/minio-irods-gateway/issues?q=is%3Aissue+is%3Aopen+label%3A%22help+wanted%22)
+6. This project has some issues (but don't we all?), [help out by contributing!](https://github.com/bioteam/minio-irods-gateway/issues?q=is%3Aissue+is%3Aopen+label%3A%22help+wanted%22)
