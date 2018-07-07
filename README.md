@@ -47,6 +47,6 @@ $ docker run -p 9000:9000 \
 
 ![screen shot 2018-06-29 at 2 34 22 pm](https://user-images.githubusercontent.com/21206449/42109096-7c43c56a-7baa-11e8-9092-9422f3cf37d2.png)
 
-5. Read more about the implementation details here:
+5. [Read more about the implementation details](https://bioteam.net/2018/07/exposing-your-irods-zone-as-aws-s3-object-storage/)
 
-https://bioteam.net/2018/07/exposing-your-irods-zone-as-aws-s3-object-storage/
+
