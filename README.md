@@ -1,8 +1,9 @@
 # [BioTeam](https://bioteam.net/) / minio-irods-gateway
 Expose iRODS zone as S3 object storage via Minio gateway.
 
-[![GoDoc](https://godoc.org/github.com/bioteam/minio-irods-gateway/irods?status.svg)](https://godoc.org/github.com/bioteam/minio-irods-gateway/irods)
+![hello_s3](https://user-images.githubusercontent.com/21206449/42189211-4875ee84-7e25-11e8-99be-58cd8fec5aea.png)
 
+[![GoDoc](https://godoc.org/github.com/bioteam/minio-irods-gateway/irods?status.svg)](https://godoc.org/github.com/bioteam/minio-irods-gateway/irods)
 
 ## Initial Setup
 
