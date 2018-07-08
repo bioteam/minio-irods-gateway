@@ -42,6 +42,7 @@ const (
 	irodsObjMetaAttr           = "minio_obj"
 	irodsMultipartMetaAttr     = "minio_multipart"
 	irodsBucketMetaAttr        = "minio_loc"
+	irodsConPoolSize           = 4
 )
 
 func init() {
@@ -115,12 +116,16 @@ func getMD5Hash(text string) string {
 
 func (a *irodsObjects) getObjectInBucket(bucket, object string) (*gorods.DataObj, error) {
 	objectNameHash := getMD5Hash(object)
-	return a.col.Con().DataObject(a.col.Path() + "/" + bucket + "/" + objectNameHash)
+	col := a.GetCol()
+	defer a.ReturnCol(col)
+	return col.Con().DataObject(col.Path() + "/" + bucket + "/" + objectNameHash)
 }
 
 func (a *irodsObjects) getMetaObjectInBucket(bucket, uploadID, metaObject string) (*gorods.DataObj, error) {
 	objectName := getIrodsMetadataObjectName(metaObject, uploadID)
-	return a.col.Con().DataObject(a.col.Path() + "/" + bucket + "/" + objectName)
+	col := a.GetCol()
+	defer a.ReturnCol(col)
+	return col.Con().DataObject(col.Path() + "/" + bucket + "/" + objectName)
 }
 
 // Returns true if marker was returned by iRODS, i.e prefixed with
@@ -158,29 +163,33 @@ func (g *Irods) Name() string {
 // NewGatewayLayer initializes GoRODS client and returns minio.ObjectLayer.
 func (g *Irods) NewGatewayLayer(creds auth.Credentials) (minio.ObjectLayer, error) {
 
-	rodsCon, conErr := gorods.NewConnection(&gorods.ConnectionOptions{
-		Type: gorods.UserDefined,
+	colPool := make(chan *gorods.Collection, irodsConPoolSize)
+	for i := 0; i < cap(colPool); i++ {
+		rodsCon, conErr := gorods.NewConnection(&gorods.ConnectionOptions{
+			Type: gorods.UserDefined,
 
-		Host: g.host,
-		Port: g.port,
-		Zone: g.zone,
+			Host: g.host,
+			Port: g.port,
+			Zone: g.zone,
 
-		Username: creds.AccessKey,
-		Password: creds.SecretKey,
-	})
-	if conErr != nil {
-		return nil, conErr
-	}
+			Username: creds.AccessKey,
+			Password: creds.SecretKey,
+		})
+		if conErr != nil {
+			return nil, conErr
+		}
 
-	col, err := rodsCon.Collection(gorods.CollectionOptions{
-		Path: g.colPath,
-	})
-	if err != nil {
-		return nil, err
+		col, err := rodsCon.Collection(gorods.CollectionOptions{
+			Path: g.colPath,
+		})
+		if err != nil {
+			return nil, err
+		}
+		colPool <- col
 	}
 
 	return &irodsObjects{
-		col: col,
+		colPool: colPool,
 	}, nil
 }
 
@@ -192,7 +201,7 @@ func (g *Irods) Production() bool {
 // irodsObjects - Implements Object layer for Irods blob storage.
 type irodsObjects struct {
 	minio.GatewayUnsupported
-	col *gorods.Collection // iRODS mount collection
+	colPool chan *gorods.Collection
 }
 
 func getMime(objName string) string {
@@ -203,6 +212,26 @@ func getMime(objName string) string {
 func irodsToObjectError(err error, params ...string) error {
 	// TODO: Implement me
 	return err
+}
+
+func (a *irodsObjects) GetCol() *gorods.Collection {
+	return <-a.colPool
+}
+
+func (a *irodsObjects) ReturnCol(col *gorods.Collection) {
+	a.colPool <- col
+}
+
+func (a *irodsObjects) RefreshCols() error {
+	for i := 0; i < cap(a.colPool); i++ {
+		col := a.GetCol()
+		defer a.ReturnCol(col)
+
+		if rErr := col.Refresh(); rErr != nil {
+			return rErr
+		}
+	}
+	return nil
 }
 
 // Shutdown - save any gateway metadata to disk
@@ -224,7 +253,10 @@ func (a *irodsObjects) MakeBucketWithLocation(ctx context.Context, bucket, locat
 		return minio.BucketNameInvalid{Bucket: bucket}
 	}
 
-	bucketCol, err := a.col.CreateSubCollection(bucket)
+	col := a.GetCol()
+	defer a.ReturnCol(col)
+
+	bucketCol, err := col.CreateSubCollection(bucket)
 	if err != nil {
 		logger.LogIf(ctx, err)
 		return irodsToObjectError(err, bucket)
@@ -237,9 +269,7 @@ func (a *irodsObjects) MakeBucketWithLocation(ctx context.Context, bucket, locat
 		logger.LogIf(ctx, mErr)
 	}
 
-	if rErr := a.col.Refresh(); rErr != nil {
-		return rErr
-	}
+	go a.RefreshCols()
 
 	_, err = bucketCol.CreateSubCollection(irodsMultipartSubCol)
 	return irodsToObjectError(err, bucket)
@@ -247,8 +277,10 @@ func (a *irodsObjects) MakeBucketWithLocation(ctx context.Context, bucket, locat
 
 // GetBucketInfo - Get bucket metadata..
 func (a *irodsObjects) GetBucketInfo(ctx context.Context, bucket string) (bi minio.BucketInfo, e error) {
+	col := a.GetCol()
+	defer a.ReturnCol(col)
 
-	searchCol := a.col.FindCol(bucket)
+	searchCol := col.FindCol(bucket)
 	if searchCol != nil {
 		return minio.BucketInfo{
 			Name:    bucket,
@@ -262,8 +294,9 @@ func (a *irodsObjects) GetBucketInfo(ctx context.Context, bucket string) (bi min
 
 // ListBuckets - Lists all irods containers, uses Irods equivalent ListContainers.
 func (a *irodsObjects) ListBuckets(ctx context.Context) (buckets []minio.BucketInfo, err error) {
-
-	cols, err := a.col.Collections()
+	col := a.GetCol()
+	defer a.ReturnCol(col)
+	cols, err := col.Collections()
 	if err != nil {
 		logger.LogIf(ctx, err)
 		return buckets, irodsToObjectError(err)
@@ -282,13 +315,16 @@ func (a *irodsObjects) ListBuckets(ctx context.Context) (buckets []minio.BucketI
 // DeleteBucket - delete a collection (bucket) in iRODS
 func (a *irodsObjects) DeleteBucket(ctx context.Context, bucket string) error {
 	var err error
-
-	searchCol := a.col.FindCol(bucket)
+	col := a.GetCol()
+	defer a.ReturnCol(col)
+	searchCol := col.FindCol(bucket)
 	if searchCol != nil {
 		err = searchCol.Destroy()
 	} else {
 		return minio.BucketNotFound{Bucket: bucket}
 	}
+
+	go a.RefreshCols()
 
 	logger.LogIf(ctx, err)
 	return irodsToObjectError(err, bucket)
@@ -329,8 +365,9 @@ func (a *irodsObjects) ListObjects(ctx context.Context, bucket, prefix, marker, 
 	// }
 
 	metaPrefix := bucket + ":::::"
-
-	objs, qErr := a.col.Con().IQuestSQL(irodsIQuestQuery, irodsObjMetaAttr, metaPrefix+prefix+"%")
+	col := a.GetCol()
+	defer a.ReturnCol(col)
+	objs, qErr := col.Con().IQuestSQL(irodsIQuestQuery, irodsObjMetaAttr, metaPrefix+prefix+"%")
 
 	if qErr != nil {
 		return result, irodsToObjectError(fmt.Errorf("Error occured listing objects in %v", bucket), bucket, prefix)
@@ -481,8 +518,9 @@ func (a *irodsObjects) GetObject(ctx context.Context, bucket, object string, sta
 // uses zure equivalent GetBlobProperties.
 func (a *irodsObjects) GetObjectInfo(ctx context.Context, bucket, object string) (objInfo minio.ObjectInfo, err error) {
 	metaPrefix := bucket + ":::::"
-
-	objs, qErr := a.col.Con().IQuestSQL(irodsIQuestQuery, irodsObjMetaAttr, metaPrefix+object)
+	col := a.GetCol()
+	defer a.ReturnCol(col)
+	objs, qErr := col.Con().IQuestSQL(irodsIQuestQuery, irodsObjMetaAttr, metaPrefix+object)
 	if qErr != nil {
 		return objInfo, fmt.Errorf("Error occured listing object in %v", bucket)
 	}
@@ -513,8 +551,9 @@ func (a *irodsObjects) GetObjectInfo(ctx context.Context, bucket, object string)
 
 func (a *irodsObjects) createRodsObj(bucket, object string, isListableObj bool) (*gorods.DataObj, error) {
 	var destObj *gorods.DataObj
-
-	col := a.col.FindCol(bucket)
+	acol := a.GetCol()
+	defer a.ReturnCol(acol)
+	col := acol.FindCol(bucket)
 	if col == nil {
 		return nil, fmt.Errorf("Can't find bucket %v", bucket)
 	}
@@ -744,8 +783,10 @@ func (a *irodsObjects) NewMultipartUpload(ctx context.Context, bucket, object st
 }
 
 func (a *irodsObjects) getMultipartCol(bucket string) (*gorods.Collection, error) {
-	mpColPath := a.col.Path() + "/" + bucket + "/" + irodsMultipartSubCol
-	return a.col.Con().Collection(gorods.CollectionOptions{
+	col := a.GetCol()
+	defer a.ReturnCol(col)
+	mpColPath := col.Path() + "/" + bucket + "/" + irodsMultipartSubCol
+	return col.Con().Collection(gorods.CollectionOptions{
 		Path: mpColPath,
 	})
 }
@@ -815,7 +856,9 @@ func (a *irodsObjects) ListObjectParts(ctx context.Context, bucket, object, uplo
 	result.UploadID = uploadID
 	result.MaxParts = maxParts
 
-	partsQ, qErr := a.col.Con().IQuestSQL(irodsIQuestQuery, irodsMultipartMetaAttr, uploadID)
+	col := a.GetCol()
+	defer a.ReturnCol(col)
+	partsQ, qErr := col.Con().IQuestSQL(irodsIQuestQuery, irodsMultipartMetaAttr, uploadID)
 	if qErr != nil {
 		return result, qErr
 	}
