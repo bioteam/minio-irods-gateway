@@ -1,8 +1,9 @@
 # [BioTeam](https://bioteam.net/) / minio-irods-gateway
-Expose iRODS zone as S3 object storage via Minio gateway.
+Expose data in your iRODS zone as S3 object storage via Minio gateway. Read the [implementation blog post here](https://bioteam.net/2018/07/exposing-your-irods-zone-as-aws-s3-object-storage/).
+
+![hello_s3](https://user-images.githubusercontent.com/21206449/42189211-4875ee84-7e25-11e8-99be-58cd8fec5aea.png)
 
 [![GoDoc](https://godoc.org/github.com/bioteam/minio-irods-gateway/irods?status.svg)](https://godoc.org/github.com/bioteam/minio-irods-gateway/irods)
-
 
 ## Initial Setup
 
@@ -46,6 +47,10 @@ $ docker run -p 9000:9000 \
 	192.168.1.147 1247 tempZone /tempZone/home/BKIKJAA5BMMU2RHO6IBB
 ```
 
-4. Browse 😎
+4. 😎 Browse 😎
 
 ![screen shot 2018-06-29 at 2 34 22 pm](https://user-images.githubusercontent.com/21206449/42109096-7c43c56a-7baa-11e8-9092-9422f3cf37d2.png)
+
+5. [Read more about the implementation details](https://bioteam.net/2018/07/exposing-your-irods-zone-as-aws-s3-object-storage/)
+
+6. This project has issues, [help out by contributing!](https://github.com/bioteam/minio-irods-gateway/issues?q=is%3Aissue+is%3Aopen+label%3A%22help+wanted%22)
