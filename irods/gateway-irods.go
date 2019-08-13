@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"io"
 	"mime"
+	"net/http"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -547,6 +548,31 @@ func (a *irodsObjects) GetObjectInfo(ctx context.Context, bucket, object string,
 
 	return objInfo, fmt.Errorf("Error occured finding object in %v", bucket)
 
+}
+
+// GetObjectNInfo - returns object info and locked object ReadCloser
+func (a *irodsObjects) GetObjectNInfo(ctx context.Context, bucket, object string, rs *minio.HTTPRangeSpec, h http.Header, lockType minio.LockType, opts minio.ObjectOptions) (gr *minio.GetObjectReader, err error) {
+	var objInfo minio.ObjectInfo
+	objInfo, err = a.GetObjectInfo(ctx, bucket, object, opts)
+	if err != nil {
+		return nil, err
+	}
+
+	var startOffset, length int64
+	startOffset, length, err = rs.GetOffsetLength(objInfo.Size)
+	if err != nil {
+		return nil, err
+	}
+
+	pr, pw := io.Pipe()
+	go func() {
+		err := a.GetObject(ctx, bucket, object, startOffset, length, pw, objInfo.ETag, opts)
+		pw.CloseWithError(err)
+	}()
+	// Setup cleanup function to cause the above go-routine to
+	// exit in case of partial read
+	pipeCloser := func() { pr.Close() }
+	return minio.NewGetObjectReaderFromReader(pr, objInfo, opts.CheckCopyPrecondFn, pipeCloser)
 }
 
 func (a *irodsObjects) createRodsObj(bucket, object string, isListableObj bool) (*gorods.DataObj, error) {
