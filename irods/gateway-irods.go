@@ -22,9 +22,9 @@ import (
 	humanize "github.com/dustin/go-humanize"
 	gorods "github.com/jjacquay712/GoRODS"
 	"github.com/minio/cli"
+	"github.com/minio/minio/cmd"
 	"github.com/minio/minio/cmd/logger"
 	"github.com/minio/minio/pkg/auth"
-	"github.com/minio/minio/pkg/hash"
 	"github.com/minio/minio/pkg/policy"
 	"github.com/minio/minio/pkg/policy/condition"
 
@@ -493,7 +493,7 @@ func (a *irodsObjects) ListObjectsV2(ctx context.Context, bucket, prefix, contin
 //
 // startOffset indicates the starting read location of the object.
 // length indicates the total length of the object.
-func (a *irodsObjects) GetObject(ctx context.Context, bucket, object string, startOffset int64, length int64, writer io.Writer, etag string) error {
+func (a *irodsObjects) GetObject(ctx context.Context, bucket, object string, startOffset int64, length int64, writer io.Writer, etag string, opts cmd.ObjectOptions) error {
 	// startOffset cannot be negative.
 	if startOffset < 0 {
 		logger.LogIf(ctx, minio.InvalidRange{})
@@ -516,7 +516,7 @@ func (a *irodsObjects) GetObject(ctx context.Context, bucket, object string, sta
 
 // GetObjectInfo - reads blob metadata properties and replies back minio.ObjectInfo,
 // uses zure equivalent GetBlobProperties.
-func (a *irodsObjects) GetObjectInfo(ctx context.Context, bucket, object string) (objInfo minio.ObjectInfo, err error) {
+func (a *irodsObjects) GetObjectInfo(ctx context.Context, bucket, object string, opts cmd.ObjectOptions) (objInfo minio.ObjectInfo, err error) {
 	metaPrefix := bucket + ":::::"
 	col := a.GetCol()
 	defer a.ReturnCol(col)
@@ -598,7 +598,7 @@ func (a *irodsObjects) getOrCreateRodsObj(bucket, object string, isListableObj b
 }
 
 // PutObject - Create a new data object with the incoming data.
-func (a *irodsObjects) PutObject(ctx context.Context, bucket, object string, data *hash.Reader, metadata map[string]string) (objInfo minio.ObjectInfo, err error) {
+func (a *irodsObjects) PutObject(ctx context.Context, bucket, object string, data *minio.PutObjReader, opts cmd.ObjectOptions) (objInfo minio.ObjectInfo, err error) {
 
 	// Get reference to iRODS data object
 	destObj, gErr := a.createRodsObj(bucket, object, true)
@@ -615,16 +615,16 @@ func (a *irodsObjects) PutObject(ctx context.Context, bucket, object string, dat
 	destObj.Close()
 
 	// Add metadata
-	for k, v := range metadata {
-		if _, mErr := destObj.AddMeta(gorods.Meta{
-			"minio_meta_" + k, // Attribute
-			v,                 // Value
-			"",                // Unit
-			nil,
-		}); mErr != nil {
-			return objInfo, mErr
-		}
-	}
+	// for k, v := range metadata {
+	// 	if _, mErr := destObj.AddMeta(gorods.Meta{
+	// 		"minio_meta_" + k, // Attribute
+	// 		v,                 // Value
+	// 		"",                // Unit
+	// 		nil,
+	// 	}); mErr != nil {
+	// 		return objInfo, mErr
+	// 	}
+	// }
 
 	md5, cErr := destObj.Chksum()
 	if cErr != nil {
@@ -644,7 +644,7 @@ func (a *irodsObjects) PutObject(ctx context.Context, bucket, object string, dat
 
 // CopyObject - Copies a blob from source container to destination container.
 // Uses Irods equivalent CopyBlob API.
-func (a *irodsObjects) CopyObject(ctx context.Context, srcBucket, srcObject, destBucket, destObject string, srcInfo minio.ObjectInfo) (objInfo minio.ObjectInfo, err error) {
+func (a *irodsObjects) CopyObject(ctx context.Context, srcBucket, srcObject, destBucket, destObject string, srcInfo minio.ObjectInfo, srcOpts, dstOpts cmd.ObjectOptions) (objInfo minio.ObjectInfo, err error) {
 
 	// TODO: Remember to handle srcInfo... it's metadata for dest obj or something
 	srcObj, sErr := a.getOrCreateRodsObj(srcBucket, srcObject, true)
@@ -684,6 +684,16 @@ func (a *irodsObjects) DeleteObject(ctx context.Context, bucket, object string) 
 	}
 
 	return rodsObj.Destroy()
+}
+
+// DeleteObject - Deletes data object in iRODS
+func (a *irodsObjects) DeleteObjects(ctx context.Context, bucket string, object []string) ([]error, error) {
+	// rodsObj, oErr := a.getObjectInBucket(bucket, object)
+	// if oErr != nil {
+	// 	return oErr
+	// }
+
+	return []error{}, nil
 }
 
 // ListMultipartUploads - It's decided not to support List Multipart Uploads, hence returning empty result.
@@ -755,7 +765,7 @@ func (mm irodsMultipartMetadata) ToJSON() ([]byte, error) {
 }
 
 // NewMultipartUpload - Use Irods equivalent CreateBlockBlob.
-func (a *irodsObjects) NewMultipartUpload(ctx context.Context, bucket, object string, metadata map[string]string) (uploadID string, err error) {
+func (a *irodsObjects) NewMultipartUpload(ctx context.Context, bucket, object string, opts cmd.ObjectOptions) (uploadID string, err error) {
 	uploadID, err = getIrodsUploadID()
 	if err != nil {
 		logger.LogIf(ctx, err)
@@ -763,20 +773,20 @@ func (a *irodsObjects) NewMultipartUpload(ctx context.Context, bucket, object st
 	}
 	metadataObject := getIrodsMetadataObjectName(object, uploadID)
 
-	mp := irodsMultipartMetadata{Name: object, Metadata: metadata}
-	jsonData, jErr := mp.ToJSON()
-	if jErr != nil {
-		return "", jErr
-	}
+	// mp := irodsMultipartMetadata{Name: object, Metadata: metadata}
+	// jsonData, jErr := mp.ToJSON()
+	// if jErr != nil {
+	// 	return "", jErr
+	// }
 
-	rodsObj, cErr := a.createRodsObj(bucket, metadataObject, false)
+	_, cErr := a.createRodsObj(bucket, metadataObject, false)
 	if cErr != nil {
 		return "", cErr
 	}
 
-	if wErr := rodsObj.Write(jsonData); wErr != nil {
-		return "", wErr
-	}
+	// if wErr := rodsObj.Write(jsonData); wErr != nil {
+	// 	return "", wErr
+	// }
 
 	return uploadID, nil
 
@@ -792,7 +802,7 @@ func (a *irodsObjects) getMultipartCol(bucket string) (*gorods.Collection, error
 }
 
 // PutObjectPart - Use Irods equivalent PutBlockWithLength.
-func (a *irodsObjects) PutObjectPart(ctx context.Context, bucket, object, uploadID string, partID int, data *hash.Reader) (info minio.PartInfo, err error) {
+func (a *irodsObjects) PutObjectPart(ctx context.Context, bucket, object, uploadID string, partID int, data *minio.PutObjReader, opts cmd.ObjectOptions) (info minio.PartInfo, err error) {
 	if err = a.checkUploadIDExists(ctx, bucket, object, uploadID); err != nil {
 		return info, err
 	}
@@ -846,7 +856,7 @@ func (a *irodsObjects) PutObjectPart(ctx context.Context, bucket, object, upload
 }
 
 // ListObjectParts - Use Irods equivalent GetBlockList.
-func (a *irodsObjects) ListObjectParts(ctx context.Context, bucket, object, uploadID string, partNumberMarker int, maxParts int) (result minio.ListPartsInfo, err error) {
+func (a *irodsObjects) ListObjectParts(ctx context.Context, bucket, object, uploadID string, partNumberMarker int, maxParts int, opts cmd.ObjectOptions) (result minio.ListPartsInfo, err error) {
 	if err = a.checkUploadIDExists(ctx, bucket, object, uploadID); err != nil {
 		return result, err
 	}
@@ -956,7 +966,7 @@ func (a *irodsObjects) AbortMultipartUpload(ctx context.Context, bucket, object,
 }
 
 // CompleteMultipartUpload - Use Irods equivalent PutBlockList.
-func (a *irodsObjects) CompleteMultipartUpload(ctx context.Context, bucket, object, uploadID string, uploadedParts []minio.CompletePart) (objInfo minio.ObjectInfo, err error) {
+func (a *irodsObjects) CompleteMultipartUpload(ctx context.Context, bucket, object, uploadID string, uploadedParts []minio.CompletePart, opts cmd.ObjectOptions) (objInfo minio.ObjectInfo, err error) {
 	if err = a.checkUploadIDExists(ctx, bucket, object, uploadID); err != nil {
 		return objInfo, err
 	}
